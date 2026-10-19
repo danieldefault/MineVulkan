@@ -33,13 +33,14 @@ public:
 
 private:
     void remeshDirtyChunks();
-    void applyActions(const FrameInput& in);
+    void applyActions(const FrameInput& in, const Vec3& eye);
     void buildUi();
 
     Renderer& renderer_;
     GameConfig cfg_;
     World world_;
     Player player_;
+    Vec3 prevPos_;  // posição antes do último passo de física (para interpolar a câmera)
     TouchControls touch_;
     UiBuilder ui_;
     std::vector<ChunkVertex> meshScratch_;

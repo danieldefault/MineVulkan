@@ -19,6 +19,7 @@ Game::Game(Renderer& renderer, const GameConfig& cfg) : renderer_(renderer), cfg
     player_.pos = Vec3(sx + 0.5f, static_cast<float>(world_.findSpawnY(sx, sz)), sz + 0.5f);
     player_.yaw = 0.6f;
     player_.pitch = -0.25f;
+    prevPos_ = player_.pos;
 }
 
 void Game::onRendererReady() {
@@ -31,9 +32,9 @@ void Game::onRendererReady() {
     texturesUploaded_ = true;
 }
 
-void Game::applyActions(const FrameInput& in) {
+void Game::applyActions(const FrameInput& in, const Vec3& eye) {
     if (!in.breakBlock && !in.placeBlock) return;
-    RayHit hit = raycastBlocks(world_, player_.eye(), player_.forward(), kReach);
+    RayHit hit = raycastBlocks(world_, eye, player_.forward(), kReach);
     if (!hit.hit) return;
     if (in.breakBlock) {
         if (blockBreakable(world_.getBlock(hit.x, hit.y, hit.z))) world_.setBlock(hit.x, hit.y, hit.z, BLOCK_AIR);
@@ -112,17 +113,21 @@ void Game::frame(double now, FrameInput in) {
     player_.applyLook(in.player.lookYaw, in.player.lookPitch);
     accumulator_ += dt;
     while (accumulator_ >= kFixedStep) {
+        prevPos_ = player_.pos;
         player_.step(world_, in.player, static_cast<float>(kFixedStep));
         accumulator_ -= kFixedStep;
     }
-    applyActions(in);
+    // A física roda a 60 Hz; em telas de 90/120 Hz a câmera travaria entre passos.
+    // Interpola entre os dois últimos estados (atraso máximo de 1 passo).
+    float alpha = static_cast<float>(accumulator_ / kFixedStep);
+    Vec3 eye = prevPos_ + (player_.pos - prevPos_) * alpha + Vec3(0, Player::kEyeHeight, 0);
+    applyActions(in, eye);
 
     world_.update(player_.pos.x, player_.pos.z, cfg_.renderRadius, cfg_.genPerFrame);
     for (int64_t key : world_.takeUnloaded()) renderer_.freeChunkMesh(key);
     remeshDirtyChunks();
 
     CameraParams cam;
-    Vec3 eye = player_.eye();
     float aspect = w / std::max(h, 1.0f);
     float fogEnd = static_cast<float>(cfg_.renderRadius) * CHUNK_SIZE;
     cam.viewProj = perspectiveVk(1.2f, aspect, 0.1f, fogEnd + 32.0f) * lookAt(eye, eye + player_.forward(), Vec3(0, 1, 0));
