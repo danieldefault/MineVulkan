@@ -787,6 +787,13 @@ void Renderer::uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<Ch
     m.quadCount = quads;
     m.cx = cx;
     m.cz = cz;
+    uint8_t minY = 255, maxY = 0;
+    for (const auto& v : verts) {
+        minY = std::min(minY, v.y);
+        maxY = std::max(maxY, v.y);
+    }
+    m.minY = minY;
+    m.maxY = maxY;
     meshes_[key] = m;
 }
 
@@ -865,20 +872,27 @@ void Renderer::recordFrame(Frame& f, uint32_t imageIndex, const CameraParams& ca
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelLayout_, 0, 1, &textureSet_, 0, nullptr);
     vkCmdBindIndexBuffer(cmd, indexBuffer_.buffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdPushConstants(cmd, voxelLayout_, stages, 0, sizeof(VoxelPush), &push);
-    uint32_t drawn = 0;
+    // Frente para trás: o early-Z descarta fragmentos escondidos antes do fragment shader
+    // (menos overdraw, que pesa em GPUs mobile).
+    drawList_.clear();
     for (const auto& kv : meshes_) {
         const GpuMesh& m = kv.second;
-        Vec3 mn(static_cast<float>(m.cx * CHUNK_SIZE), 0.0f, static_cast<float>(m.cz * CHUNK_SIZE));
-        Vec3 mx = mn + Vec3(CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_SIZE);
+        Vec3 mn(static_cast<float>(m.cx * CHUNK_SIZE), m.minY, static_cast<float>(m.cz * CHUNK_SIZE));
+        Vec3 mx(mn.x + CHUNK_SIZE, m.maxY, mn.z + CHUNK_SIZE);
         if (!frustum.aabbVisible(mn, mx)) continue;
-        float origin[4] = {mn.x, 0.0f, mn.z, 0.0f};
+        float dx = mn.x + CHUNK_SIZE * 0.5f - cam.position.x, dz = mn.z + CHUNK_SIZE * 0.5f - cam.position.z;
+        drawList_.push_back({dx * dx + dz * dz, &m});
+    }
+    std::sort(drawList_.begin(), drawList_.end(), [](const DrawItem& a, const DrawItem& b) { return a.dist2 < b.dist2; });
+    for (const DrawItem& d : drawList_) {
+        const GpuMesh& m = *d.mesh;
+        float origin[4] = {static_cast<float>(m.cx * CHUNK_SIZE), 0.0f, static_cast<float>(m.cz * CHUNK_SIZE), 0.0f};
         vkCmdPushConstants(cmd, voxelLayout_, stages, offsetof(VoxelPush, chunkOrigin), sizeof(origin), origin);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &m.vb.buffer, &offset);
         vkCmdDrawIndexed(cmd, m.quadCount * 6, 1, 0, 0, 0);
-        ++drawn;
     }
-    lastDrawnChunks_ = drawn;
+    lastDrawnChunks_ = static_cast<uint32_t>(drawList_.size());
 
     // --- interface
     uint32_t uiCount = static_cast<uint32_t>(std::min<size_t>(ui.size(), kMaxUiVertices));

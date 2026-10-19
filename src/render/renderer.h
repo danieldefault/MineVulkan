@@ -64,6 +64,11 @@ private:
         Buffer vb;
         uint32_t quadCount = 0;
         int cx = 0, cz = 0;
+        float minY = 0, maxY = 0;  // altura real da malha (AABB mais justa no culling)
+    };
+    struct DrawItem {
+        float dist2;
+        const GpuMesh* mesh;
     };
     struct Frame {
         VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -131,6 +136,7 @@ private:
     Buffer indexBuffer_;
     uint32_t maxQuads_ = 0;
     std::unordered_map<int64_t, GpuMesh> meshes_;
+    std::vector<DrawItem> drawList_;  // reaproveitado entre frames
 
     Frame frames_[kFramesInFlight];
     uint32_t frameIndex_ = 0;
