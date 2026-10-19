@@ -95,6 +95,12 @@ uint32_t pixel(int tile, int x, int y) {
             if (n < 0.16f) return shade(24, 52, 30, 0.7f);
             return shade(40, 84, 52, 0.7f + 0.45f * n);
         }
+        case TILE_WATER: {
+            // Translúcida (alpha < 255); ondulações suaves em faixas diagonais.
+            float wave = 0.5f + 0.5f * std::sin((static_cast<float>(x) + static_cast<float>(y) * 0.6f) * 0.9f);
+            float k = 0.85f + 0.1f * wave + 0.08f * n;
+            return rgba(44.0f * k, 96.0f * k, 196.0f * k, 165.0f);
+        }
         default: return rgba(255, 0, 255);
     }
 }

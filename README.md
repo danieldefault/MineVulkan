@@ -27,8 +27,11 @@ Um clone de Minecraft escrito do zero em **C++17 + Vulkan 1.0**, pensado para ro
   | Deserto | areia sobre arenito | cactos |
   | Tundra | terra com neve | pinheiros |
   | Montanha | pedra; neve acima da linha de neve | — |
+  | Oceano | fundo de areia, coberto de água até o nível do mar | — |
 
-  Encostas íngremes expõem pedra em qualquer bioma (exceto deserto).
+  Encostas íngremes expõem pedra em qualquer bioma (exceto deserto). Costas têm praias de areia.
+- 🌊 **Água translúcida**: oceanos e lagos no nível do mar (y = 44), fundo escurecendo com a profundidade, névoa azul debaixo d'água
+- 🏊 **Natação**: afunda devagar, pulo nada para cima, impulso automático para sair pela margem; quebrar um bloco ao lado da água abre espaço para ela (sem simulação de escoamento)
 - 📦 **Streaming de chunks** ao redor do jogador, mais próximos primeiro, com orçamento de geração/malha por frame
 - 💾 **Edições preservadas**: blocos quebrados/colocados continuam lá ao se afastar e voltar (durante a sessão)
 - 🧱 **Malha otimizada** com face culling e oclusão de ambiente por vértice (AO "estilo Minecraft")
@@ -39,7 +42,7 @@ Um clone de Minecraft escrito do zero em **C++17 + Vulkan 1.0**, pensado para ro
 - 🌫️ **Névoa na distância** e **frustum culling** por chunk
 - 📱 **Controles touch**: joystick virtual, arrastar para olhar, botão de pulo
 
-Blocos na hotbar: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, areia, arenito e neve. Também aparecem no mundo: terra com neve, cacto, folhas de pinheiro e bedrock (indestrutível).
+Blocos na hotbar: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, areia, arenito e neve. Também aparecem no mundo: terra com neve, cacto, folhas de pinheiro, água e bedrock (indestrutível).
 
 ---
 
@@ -55,6 +58,7 @@ Blocos na hotbar: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, arei
 | Texture array em vez de atlas | Mipmaps sem "vazamento" entre texturas vizinhas |
 | Chunks desenhados da frente para trás | O early-Z descarta fragmentos escondidos antes do fragment shader (menos overdraw) |
 | AABB de culling com a altura real da malha | Chunks abaixo/acima da câmera são descartados mais cedo |
+| Água no fim do mesmo vertex buffer do chunk, desenhada num 2º passe | Sem buffer extra; só a faixa de índices muda. Blend só onde há água, de trás para frente |
 
 ---
 
@@ -64,7 +68,7 @@ Blocos na hotbar: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, arei
 |---|---|---|
 | Mover | Joystick à esquerda | `W` `A` `S` `D` |
 | Olhar | Arrastar na tela | Mouse (clique para capturar, `Esc` libera) |
-| Pular | Botão de pulo | `Espaço` |
+| Pular / nadar para cima | Botão de pulo | `Espaço` |
 | Colocar bloco | Toque curto | Botão direito |
 | Quebrar bloco | Segurar | Botão esquerdo |
 | Trocar bloco | Toque na hotbar | `1`–`9`, `0` ou roda do mouse |
@@ -133,7 +137,8 @@ VC_VALIDATION=1 ./build/voxelcraft # com a camada de validação do Vulkan (se i
 | `--radius N` | Distância de renderização em chunks (padrão: 8) |
 | `--seed N` | Semente do mundo (padrão: 1337) |
 | `--touch-ui` | Mostra a HUD touch no PC |
-| `--spawn X Z` | Começa na coluna (X, Z) — útil para visitar um bioma (o log mostra o bioma atual) |
+| `--spawn X Z` | Começa na terra firme mais próxima de (X, Z) — útil para visitar um bioma (o log mostra o bioma atual) |
+| `--look YAW PITCH` | Direção inicial da câmera, em radianos |
 | `--frames N` | Encerra após N frames (testes automatizados) |
 | `--walk` / `--turn R` | Anda para frente / gira a câmera R rad por frame sozinho |
 
@@ -148,7 +153,7 @@ src/game/      liga mundo + jogador + renderer, independente de plataforma
 src/platform/  android/ (NativeActivity) e desktop/ (X11/xcb)
 shaders/       GLSL, compilado para SPIR-V e embutido no binário durante o build
 cmake/         scripts de compilação e embutimento dos shaders
-tests/         testes do núcleo (terreno, biomas, vegetação, mesher, raycast, física, texturas, streaming, edições)
+tests/         testes do núcleo (terreno, biomas, vegetação, água, natação, mesher, raycast, física, texturas, streaming, edições)
 app/           módulo Android (Gradle)
 ```
 

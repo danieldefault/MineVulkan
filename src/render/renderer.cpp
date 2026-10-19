@@ -405,6 +405,7 @@ bool Renderer::createSwapchain() {
     if (chosen.format != colorFormat_) {
         // Primeira vez (ou formato mudou): render pass e pipelines dependem do formato.
         if (voxelPipeline_) vkDestroyPipeline(device_, voxelPipeline_, nullptr);
+        if (waterPipeline_) vkDestroyPipeline(device_, waterPipeline_, nullptr);
         if (uiPipeline_) vkDestroyPipeline(device_, uiPipeline_, nullptr);
         if (renderPass_) vkDestroyRenderPass(device_, renderPass_, nullptr);
         colorFormat_ = chosen.format;
@@ -621,6 +622,20 @@ void Renderer::createPipelines() {
         pi.layout = voxelLayout_;
         pi.renderPass = renderPass_;
         VK_CHECK(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pi, nullptr, &voxelPipeline_));
+
+        // Água: mesmo vértice/shader, com blend, sem escrever profundidade (não esconde o
+        // que está atrás dela) e sem culling (a superfície é vista também de baixo).
+        rs.cullMode = VK_CULL_MODE_NONE;
+        dss.depthWriteEnable = VK_FALSE;
+        dss.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+        cba.blendEnable = VK_TRUE;
+        cba.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        cba.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.colorBlendOp = VK_BLEND_OP_ADD;
+        cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        cba.alphaBlendOp = VK_BLEND_OP_ADD;
+        VK_CHECK(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pi, nullptr, &waterPipeline_));
     }
     // --- UI (2D, alpha blending, sem profundidade)
     {
@@ -768,7 +783,8 @@ void Renderer::uploadBlockTextures(const std::vector<std::vector<uint32_t>>& mip
 
 // ---------------------------------------------------------------- malhas
 
-void Renderer::uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<ChunkVertex>& verts) {
+void Renderer::uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<ChunkVertex>& verts,
+                               uint32_t opaqueQuads) {
     auto it = meshes_.find(key);
     if (it != meshes_.end()) {
         // A malha antiga pode estar em uso por frames em voo: libera depois.
@@ -784,7 +800,8 @@ void Renderer::uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<Ch
     GpuMesh m;
     m.vb = createBuffer(verts.size() * sizeof(ChunkVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
     std::memcpy(m.vb.mapped, verts.data(), verts.size() * sizeof(ChunkVertex));
-    m.quadCount = quads;
+    m.opaqueQuads = std::min(opaqueQuads, quads);
+    m.waterQuads = quads - m.opaqueQuads;
     m.cx = cx;
     m.cz = cz;
     uint8_t minY = 255, maxY = 0;
@@ -865,7 +882,8 @@ void Renderer::recordFrame(Frame& f, uint32_t imageIndex, const CameraParams& ca
     push.camPos[1] = cam.position.y;
     push.camPos[2] = cam.position.z;
     push.camPos[3] = cam.fogEnd;
-    std::memcpy(push.fogColor, cam.fogColor, sizeof(push.fogColor));
+    std::memcpy(push.fogColor, cam.fogColor, sizeof(cam.fogColor));
+    push.fogColor[3] = cam.fogStart;
     const VkShaderStageFlags stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, voxelPipeline_);
@@ -884,13 +902,27 @@ void Renderer::recordFrame(Frame& f, uint32_t imageIndex, const CameraParams& ca
         drawList_.push_back({dx * dx + dz * dz, &m});
     }
     std::sort(drawList_.begin(), drawList_.end(), [](const DrawItem& a, const DrawItem& b) { return a.dist2 < b.dist2; });
-    for (const DrawItem& d : drawList_) {
-        const GpuMesh& m = *d.mesh;
-        float origin[4] = {static_cast<float>(m.cx * CHUNK_SIZE), 0.0f, static_cast<float>(m.cz * CHUNK_SIZE), 0.0f};
+    auto drawRange = [&](const GpuMesh& m, uint32_t firstQuad, uint32_t quads) {
+        float origin[4] = {static_cast<float>(m.cx * CHUNK_SIZE), 0.0f, static_cast<float>(m.cz * CHUNK_SIZE),
+                           static_cast<float>(SEA_LEVEL) + 0.875f};
         vkCmdPushConstants(cmd, voxelLayout_, stages, offsetof(VoxelPush, chunkOrigin), sizeof(origin), origin);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &m.vb.buffer, &offset);
-        vkCmdDrawIndexed(cmd, m.quadCount * 6, 1, 0, 0, 0);
+        // O índice compartilhado aponta para o quad q nos vértices 4q..4q+3: basta pular índices.
+        vkCmdDrawIndexed(cmd, quads * 6, 1, firstQuad * 6, 0, 0);
+    };
+    for (const DrawItem& d : drawList_)
+        if (d.mesh->opaqueQuads) drawRange(*d.mesh, 0, d.mesh->opaqueQuads);
+    // Água depois de todo o opaco, de trás para frente (blend correto entre chunks).
+    bool waterBound = false;
+    for (auto it = drawList_.rbegin(); it != drawList_.rend(); ++it) {
+        const GpuMesh& m = *it->mesh;
+        if (!m.waterQuads) continue;
+        if (!waterBound) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline_);
+            waterBound = true;
+        }
+        drawRange(m, m.opaqueQuads, m.waterQuads);
     }
     lastDrawnChunks_ = static_cast<uint32_t>(drawList_.size());
 
@@ -965,6 +997,7 @@ void Renderer::shutdown() {
         if (texMemory_) vkFreeMemory(device_, texMemory_, nullptr);
         vkDestroySampler(device_, sampler_, nullptr);
         vkDestroyPipeline(device_, voxelPipeline_, nullptr);
+        vkDestroyPipeline(device_, waterPipeline_, nullptr);
         vkDestroyPipeline(device_, uiPipeline_, nullptr);
         vkDestroyPipelineLayout(device_, voxelLayout_, nullptr);
         vkDestroyPipelineLayout(device_, uiLayout_, nullptr);

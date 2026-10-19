@@ -17,6 +17,7 @@ struct GameConfig {
     int meshPerFrame = 4;   // chunks remalhados por frame
     bool touchUi = false;   // desenha joystick/pulo
     int spawnX = 8, spawnZ = 8;  // coluna inicial do jogador
+    float spawnYaw = 0.6f, spawnPitch = -0.25f;  // direção inicial da câmera (rad)
 };
 
 // Liga mundo, jogador e renderer. Independente de plataforma.

@@ -24,6 +24,7 @@ const char* biomeName(Biome b) {
         case Biome::Desert: return "deserto";
         case Biome::Tundra: return "tundra";
         case Biome::Mountains: return "montanha";
+        case Biome::Ocean: return "oceano";
     }
     return "?";
 }
@@ -35,7 +36,10 @@ int World::terrainHeight(int x, int z) const {
     // O fBm fica quase sempre em [-0.2, 0.2]: começa a subir a partir do percentil ~70
     // (0.05) para que ~5% das colunas passem de kMountainHeight.
     float m = std::max(0.0f, (mountains_.fbm(fx * 0.005f, fz * 0.005f, 4) - 0.05f) / 0.16f);
-    float height = 46.0f + c * 12.0f + h * 7.0f + m * m * 55.0f;
+    // Oceanos onde o continental é baixo (~27% abaixo de -0.07): afunda até 20 blocos
+    // com transição suave (smoothstep), formando costas em vez de degraus.
+    float o = std::clamp((-0.07f - c) / 0.08f, 0.0f, 1.0f);
+    float height = 46.0f + c * 12.0f + h * 7.0f + m * m * 55.0f - o * o * (3.0f - 2.0f * o) * 20.0f;
     // Comprime suavemente acima de 90 rumo ao teto (assíntota): picos continuam pontudos
     // em vez de virarem platôs cortados em CHUNK_HEIGHT - 12.
     const float knee = 90.0f, room = static_cast<float>(CHUNK_HEIGHT - 12) - knee;
@@ -47,6 +51,7 @@ Biome World::biomeAt(int x, int z) const { return biomeAt(x, z, terrainHeight(x,
 
 Biome World::biomeAt(int x, int z, int height) const {
     if (height > kMountainHeight) return Biome::Mountains;
+    if (height < SEA_LEVEL - 2) return Biome::Ocean;
     float fx = static_cast<float>(x) * 0.0016f, fz = static_cast<float>(z) * 0.0016f;
     // Limiares escolhidos pelos percentis do fBm (~[-0.17, 0.17] em 80% das colunas):
     // ~20% tundra, ~15% deserto, ~35% floresta, resto planície.
@@ -103,6 +108,13 @@ bool World::setBlock(int x, int y, int z, uint8_t b) {
     return true;
 }
 
+bool World::breakBlock(int x, int y, int z) {
+    const int n[5][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0}};
+    bool water = false;
+    for (const auto& d : n) water |= getBlock(x + d[0], y + d[1], z + d[2]) == BLOCK_WATER;
+    return setBlock(x, y, z, water ? BLOCK_WATER : BLOCK_AIR);
+}
+
 bool World::hasAllNeighbors(int cx, int cz) const {
     for (int dz = -1; dz <= 1; ++dz)
         for (int dx = -1; dx <= 1; ++dx)
@@ -136,6 +148,11 @@ void World::generateChunk(int cx, int cz) {
                 case Biome::Mountains: top = h > kSnowLine ? BLOCK_SNOW_BLOCK : BLOCK_STONE; sub = BLOCK_STONE; break;
                 default: break;
             }
+            if (h < SEA_LEVEL) {
+                top = sub = BLOCK_SAND;  // fundo do mar/lago
+            } else if (h <= SEA_LEVEL + 1 && biome != Biome::Tundra && biome != Biome::Mountains) {
+                top = sub = BLOCK_SAND;  // praia
+            }
             // Encosta íngreme: rocha exposta (sem degraus de grama/terra), exceto no deserto.
             if (cliff && biome != Biome::Desert) top = sub = BLOCK_STONE;
             for (int y = 0; y < CHUNK_HEIGHT; ++y) {
@@ -145,6 +162,7 @@ void World::generateChunk(int cx, int cz) {
                 else if (y < h - 4) b = deep;  // arenito sob a areia do deserto
                 else if (y < h) b = sub;
                 else if (y == h) b = top;
+                else if (y <= SEA_LEVEL) b = BLOCK_WATER;
                 else b = BLOCK_AIR;
                 c.set(lx, y, lz, b);
             }
@@ -208,6 +226,7 @@ void World::placeVegetationInto(Chunk& c) const {
             int lowest = std::min(std::min(terrainHeight(tx - 1, tz), terrainHeight(tx + 1, tz)),
                                   std::min(terrainHeight(tx, tz - 1), terrainHeight(tx, tz + 1)));
             if (ground - lowest >= kCliffDrop) continue;  // nada cresce em rocha exposta
+            if (ground <= SEA_LEVEL + 1) continue;          // nem na água ou na praia
             uint32_t roll = (h >> 16) % 16u;  // densidade por bioma: chance = n/16 dos candidatos
             switch (biomeAt(tx, tz, ground)) {
                 case Biome::Forest:
@@ -224,7 +243,8 @@ void World::placeVegetationInto(Chunk& c) const {
                         for (int y = ground + 1; y <= ground + 1 + static_cast<int>((h >> 8) % 3u); ++y)
                             put(tx, y, tz, BLOCK_CACTUS, true);
                     break;
-                case Biome::Mountains: break;
+                case Biome::Mountains:
+                case Biome::Ocean: break;
             }
         }
     }
@@ -268,4 +288,18 @@ int World::findSpawnY(int x, int z) const {
     for (int y = terrainHeight(x, z) + 1; y < CHUNK_HEIGHT - 2; ++y)
         if (!blockSolid(getBlock(x, y, z)) && !blockSolid(getBlock(x, y + 1, z))) return y;
     return CHUNK_HEIGHT - 2;
+}
+
+bool World::findLand(int& x, int& z, int maxRadius) const {
+    for (int r = 0; r <= maxRadius; r += 4)
+        for (int dz = -r; dz <= r; dz += 4)
+            for (int dx = -r; dx <= r; dx += 4) {
+                if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
+                if (terrainHeight(x + dx, z + dz) > SEA_LEVEL + 1) {
+                    x += dx;
+                    z += dz;
+                    return true;
+                }
+            }
+    return false;
 }

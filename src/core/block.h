@@ -17,6 +17,7 @@ enum Block : uint8_t {
     BLOCK_SANDSTONE,
     BLOCK_CACTUS,
     BLOCK_SPRUCE_LEAVES,
+    BLOCK_WATER,          // translúcida, não sólida; desenhada num passe separado
     BLOCK_COUNT
 };
 
@@ -39,6 +40,7 @@ enum Tile : uint8_t {
     TILE_CACTUS_SIDE,
     TILE_CACTUS_TOP,
     TILE_SPRUCE_LEAVES,
+    TILE_WATER,
     TILE_COUNT
 };
 
@@ -59,13 +61,15 @@ inline uint8_t blockTile(uint8_t block, int face) {
         case BLOCK_SANDSTONE: return TILE_SANDSTONE;
         case BLOCK_CACTUS: return (face == 2 || face == 3) ? TILE_CACTUS_TOP : TILE_CACTUS_SIDE;
         case BLOCK_SPRUCE_LEAVES: return TILE_SPRUCE_LEAVES;
+        case BLOCK_WATER: return TILE_WATER;
         default: return TILE_STONE;
     }
 }
 
-inline bool blockSolid(uint8_t b) { return b != BLOCK_AIR; }
-inline bool blockOpaque(uint8_t b) { return b != BLOCK_AIR; }
-inline bool blockBreakable(uint8_t b) { return b != BLOCK_AIR && b != BLOCK_BEDROCK; }
+inline bool blockSolid(uint8_t b) { return b != BLOCK_AIR && b != BLOCK_WATER; }
+inline bool blockOpaque(uint8_t b) { return b != BLOCK_AIR && b != BLOCK_WATER; }
+inline bool blockBreakable(uint8_t b) { return blockSolid(b) && b != BLOCK_BEDROCK; }
+inline bool blockReplaceable(uint8_t b) { return !blockSolid(b); }  // dá para colocar bloco aqui
 
 // Blocos disponíveis na hotbar (desktop: teclas 1-9 e 0).
 constexpr uint8_t kHotbar[] = {BLOCK_GRASS, BLOCK_DIRT,   BLOCK_STONE, BLOCK_COBBLE,    BLOCK_PLANKS,

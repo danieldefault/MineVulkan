@@ -51,7 +51,10 @@ int main(int argc, char** argv) {
         else if (a == "--turn" && i + 1 < argc) turnPerFrame = static_cast<float>(std::atof(argv[++i]));
         else if (a == "--walk") walk = true;
         else if (a == "--touch-ui") cfg.touchUi = true;
-        else if (a == "--spawn" && i + 2 < argc) {
+        else if (a == "--look" && i + 2 < argc) {
+            cfg.spawnYaw = static_cast<float>(std::atof(argv[++i]));
+            cfg.spawnPitch = static_cast<float>(std::atof(argv[++i]));
+        } else if (a == "--spawn" && i + 2 < argc) {
             cfg.spawnX = std::atoi(argv[++i]);
             cfg.spawnZ = std::atoi(argv[++i]);
         }

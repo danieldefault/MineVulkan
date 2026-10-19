@@ -10,6 +10,7 @@
 constexpr int CHUNK_SIZE = 16;     // X e Z
 constexpr int CHUNK_HEIGHT = 128;  // Y
 constexpr int CHUNK_VOLUME = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
+constexpr int SEA_LEVEL = 44;  // colunas abaixo disto ficam cobertas de água até aqui
 
 struct Chunk {
     int cx = 0, cz = 0;
@@ -21,7 +22,7 @@ struct Chunk {
     void set(int x, int y, int z, uint8_t b) { blocks[index(x, y, z)] = b; }
 };
 
-enum class Biome : uint8_t { Plains, Forest, Desert, Tundra, Mountains };
+enum class Biome : uint8_t { Plains, Forest, Desert, Tundra, Mountains, Ocean };
 const char* biomeName(Biome b);
 
 inline int floorDiv(int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
@@ -36,6 +37,9 @@ public:
     uint8_t getBlock(int x, int y, int z) const;  // chunk ausente => AR
     bool isSolidForPhysics(int x, int y, int z) const;  // chunk ausente => sólido (não cai no vazio)
     bool setBlock(int x, int y, int z, uint8_t b);
+    // Remove o bloco; se houver água ao lado ou em cima, o espaço vira água (sem simular
+    // escoamento: só a célula aberta é preenchida).
+    bool breakBlock(int x, int y, int z);
 
     Chunk* getChunk(int cx, int cz);
     const Chunk* getChunk(int cx, int cz) const;
@@ -55,6 +59,8 @@ public:
     Biome biomeAt(int x, int z) const;
     Biome biomeAt(int x, int z, int height) const;  // evita recalcular a altura
     int findSpawnY(int x, int z) const;
+    // Coluna de terra firme (acima do nível do mar) mais próxima de (x, z), em espiral.
+    bool findLand(int& x, int& z, int maxRadius) const;
 
     const std::unordered_map<int64_t, std::unique_ptr<Chunk>>& chunks() const { return chunks_; }
 

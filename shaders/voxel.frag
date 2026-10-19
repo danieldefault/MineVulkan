@@ -14,6 +14,8 @@ layout(location = 2) in float vFog;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    vec3 c = texture(uTex, vUV).rgb * vShade;
-    outColor = vec4(mix(c, pc.fogColor.rgb, vFog), 1.0);
+    vec4 t = texture(uTex, vUV);
+    vec3 c = t.rgb * vShade;
+    // Alpha só importa no passe da água (blend); na névoa ela fica opaca como o resto.
+    outColor = vec4(mix(c, pc.fogColor.rgb, vFog), mix(t.a, 1.0, vFog));
 }

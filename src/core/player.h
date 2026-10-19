@@ -20,12 +20,21 @@ public:
     static constexpr float kJumpSpeed = 8.4f;
     static constexpr float kGravity = 28.0f;
     static constexpr float kMaxFall = 30.0f;
+    // Na água: afunda devagar, pulo = nadar para cima, movimento mais lento.
+    static constexpr float kSwimSpeed = 2.2f;
+    static constexpr float kSwimUpAccel = 22.0f;
+    static constexpr float kSwimMaxUp = 3.2f;
+    static constexpr float kSinkSpeed = 2.0f;
+    // Sair pela margem: da linha d'água (pés ~0.4 abaixo da superfície) até o topo de um
+    // bloco acima dela são ~1.6 blocos: v = sqrt(2 * 28 * 1.6) ≈ 9.5.
+    static constexpr float kWaterExitSpeed = 10.0f;
 
     Vec3 pos;  // centro dos pés
     Vec3 vel;
     float yaw = 0;    // 0 = olhando para -Z
     float pitch = 0;
     bool onGround = false;
+    bool inWater = false;  // corpo na água (atualizado em step)
 
     void applyLook(float dYaw, float dPitch);
     void step(const World& world, const PlayerInput& in, float dt);  // passo fixo

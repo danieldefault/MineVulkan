@@ -65,12 +65,25 @@ void Player::step(const World& world, const PlayerInput& in, float dt) {
     float len = std::sqrt(wx * wx + wz * wz);
     if (len > 1.0f) { wx /= len; wz /= len; }
 
-    float control = onGround ? 1.0f : 0.12f;
-    vel.x += (wx * kWalkSpeed - vel.x) * control;
-    vel.z += (wz * kWalkSpeed - vel.z) * control;
+    // Na água se a altura da cintura estiver submersa.
+    inWater = world.getBlock(static_cast<int>(std::floor(pos.x)), static_cast<int>(std::floor(pos.y + 0.4f)),
+                             static_cast<int>(std::floor(pos.z))) == BLOCK_WATER;
 
-    if (in.jump && onGround) vel.y = kJumpSpeed;
-    vel.y = std::max(vel.y - kGravity * dt, -kMaxFall);
+    float control = inWater ? 0.25f : (onGround ? 1.0f : 0.12f);
+    float speed = inWater ? kSwimSpeed : kWalkSpeed;
+    vel.x += (wx * speed - vel.x) * control;
+    vel.z += (wz * speed - vel.z) * control;
+
+    if (inWater) {
+        // Arrasto forte: a velocidade vertical tende a -kSinkSpeed (afundar) ou sobe nadando.
+        // (um impulso acima do limite, p.ex. ao sair pela margem, só perde força pela gravidade)
+        if (in.jump && vel.y < kSwimMaxUp) vel.y = std::min(vel.y + kSwimUpAccel * dt, kSwimMaxUp);
+        else if (in.jump) vel.y -= kGravity * dt;
+        else vel.y += (-kSinkSpeed - vel.y) * std::min(1.0f, 4.0f * dt);
+    } else {
+        if (in.jump && onGround) vel.y = kJumpSpeed;
+        vel.y = std::max(vel.y - kGravity * dt, -kMaxFall);
+    }
 
     bool wasOnGround = onGround;
     onGround = false;
@@ -78,6 +91,11 @@ void Player::step(const World& world, const PlayerInput& in, float dt) {
     bool hitZ = moveAxis(world, 2, vel.z * dt);
     float dy = vel.y * dt;
     if (moveAxis(world, 1, dy) && dy < 0) onGround = true;
+
+    // Saindo da água: nadando na superfície contra a margem, pula para cima dela.
+    bool headOut = world.getBlock(static_cast<int>(std::floor(pos.x)), static_cast<int>(std::floor(pos.y + 1.5f)),
+                                  static_cast<int>(std::floor(pos.z))) != BLOCK_WATER;
+    if ((hitX || hitZ) && inWater && headOut && len > 0.1f) vel.y = std::max(vel.y, kWaterExitSpeed);
 
     // Pulo automático (essencial no touch): bateu numa parede andando no chão.
     if ((hitX || hitZ) && wasOnGround && len > 0.1f) {

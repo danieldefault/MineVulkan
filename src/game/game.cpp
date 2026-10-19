@@ -12,14 +12,14 @@ constexpr float kReach = 6.0f;
 }  // namespace
 
 Game::Game(Renderer& renderer, const GameConfig& cfg) : renderer_(renderer), cfg_(cfg), world_(cfg.seed) {
-    // Área inicial gerada de forma síncrona para posicionar o jogador.
-    const int sx = cfg.spawnX, sz = cfg.spawnZ;
+    // Área inicial gerada de forma síncrona para posicionar o jogador (em terra firme).
+    int sx = cfg.spawnX, sz = cfg.spawnZ;
+    world_.findLand(sx, sz, 2048);
     const int scx = floorDiv(sx, CHUNK_SIZE), scz = floorDiv(sz, CHUNK_SIZE);
     for (int dz = -2; dz <= 2; ++dz)
         for (int dx = -2; dx <= 2; ++dx) world_.generateChunk(scx + dx, scz + dz);
     player_.pos = Vec3(sx + 0.5f, static_cast<float>(world_.findSpawnY(sx, sz)), sz + 0.5f);
-    player_.yaw = 0.6f;
-    player_.pitch = -0.25f;
+    player_.applyLook(cfg.spawnYaw, cfg.spawnPitch);
     prevPos_ = player_.pos;
 }
 
@@ -38,12 +38,12 @@ void Game::applyActions(const FrameInput& in, const Vec3& eye) {
     RayHit hit = raycastBlocks(world_, eye, player_.forward(), kReach);
     if (!hit.hit) return;
     if (in.breakBlock) {
-        if (blockBreakable(world_.getBlock(hit.x, hit.y, hit.z))) world_.setBlock(hit.x, hit.y, hit.z, BLOCK_AIR);
+        if (blockBreakable(world_.getBlock(hit.x, hit.y, hit.z))) world_.breakBlock(hit.x, hit.y, hit.z);
     } else if (in.placeBlock) {
         int px = hit.x + hit.nx, py = hit.y + hit.ny, pz = hit.z + hit.nz;
         if (py < 0 || py >= CHUNK_HEIGHT) return;
         if (player_.overlapsBlock(px, py, pz)) return;
-        if (world_.getBlock(px, py, pz) != BLOCK_AIR) return;
+        if (!blockReplaceable(world_.getBlock(px, py, pz))) return;  // ar ou água
         world_.setBlock(px, py, pz, kHotbar[selected_]);
     }
 }
@@ -63,8 +63,8 @@ void Game::remeshDirtyChunks() {
                       [](const Cand& a, const Cand& b) { return a.d < b.d; });
     for (int i = 0; i < n; ++i) {
         Chunk* c = cands[i].c;
-        buildChunkMesh(world_, c->cx, c->cz, meshScratch_);
-        renderer_.uploadChunkMesh(chunkKey(c->cx, c->cz), c->cx, c->cz, meshScratch_);
+        uint32_t opaqueQuads = buildChunkMesh(world_, c->cx, c->cz, meshScratch_);
+        renderer_.uploadChunkMesh(chunkKey(c->cx, c->cz), c->cx, c->cz, meshScratch_, opaqueQuads);
         c->meshDirty = false;
     }
 }
@@ -134,6 +134,15 @@ void Game::frame(double now, FrameInput in) {
     cam.viewProj = perspectiveVk(1.2f, aspect, 0.1f, fogEnd + 32.0f) * lookAt(eye, eye + player_.forward(), Vec3(0, 1, 0));
     cam.position = eye;
     cam.fogEnd = fogEnd;
+    // Câmera submersa: névoa azul e curta (a superfície fica 1/8 abaixo do topo do bloco).
+    int ex = static_cast<int>(std::floor(eye.x)), ey = static_cast<int>(std::floor(eye.y + 0.125f));
+    int ez = static_cast<int>(std::floor(eye.z));
+    if (world_.getBlock(ex, ey, ez) == BLOCK_WATER) {
+        cam.fogEnd = 24.0f;
+        cam.fogStart = 0.0f;  // tom azul desde a câmera
+        const float water[3] = {0.10f, 0.24f, 0.50f};
+        std::copy(water, water + 3, cam.fogColor);
+    }
     buildUi();
     renderer_.endFrame(cam, ui_.verts);
 

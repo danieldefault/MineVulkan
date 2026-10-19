@@ -13,7 +13,8 @@ struct CameraParams {
     Mat4 viewProj;  // sem pré-rotação (o renderer aplica)
     Vec3 position;
     float fogEnd = 100.0f;
-    float fogColor[4] = {0.62f, 0.78f, 0.98f, 1.0f};
+    float fogStart = 0.55f;  // fração de fogEnd onde a névoa começa
+    float fogColor[3] = {0.62f, 0.78f, 0.98f};
 };
 
 // Renderer Vulkan 1.0 voltado a GPUs mobile (Mali/Adreno):
@@ -41,7 +42,8 @@ public:
     bool beginFrame();
     void endFrame(const CameraParams& cam, const std::vector<UiVertex>& ui);
 
-    void uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<ChunkVertex>& verts);
+    // verts: quads opacos primeiro, depois os de água (ver buildChunkMesh).
+    void uploadChunkMesh(int64_t key, int cx, int cz, const std::vector<ChunkVertex>& verts, uint32_t opaqueQuads);
     void freeChunkMesh(int64_t key);
 
     // Tamanho lógico (orientação atual da tela) — usar para aspect ratio e UI.
@@ -62,7 +64,7 @@ private:
     };
     struct GpuMesh {
         Buffer vb;
-        uint32_t quadCount = 0;
+        uint32_t opaqueQuads = 0, waterQuads = 0;
         int cx = 0, cz = 0;
         float minY = 0, maxY = 0;  // altura real da malha (AABB mais justa no culling)
     };
@@ -126,7 +128,7 @@ private:
     VkDescriptorPool descPool_ = VK_NULL_HANDLE;
     VkDescriptorSet textureSet_ = VK_NULL_HANDLE;
     VkPipelineLayout voxelLayout_ = VK_NULL_HANDLE, uiLayout_ = VK_NULL_HANDLE;
-    VkPipeline voxelPipeline_ = VK_NULL_HANDLE, uiPipeline_ = VK_NULL_HANDLE;
+    VkPipeline voxelPipeline_ = VK_NULL_HANDLE, waterPipeline_ = VK_NULL_HANDLE, uiPipeline_ = VK_NULL_HANDLE;
 
     VkImage texImage_ = VK_NULL_HANDLE;
     VkDeviceMemory texMemory_ = VK_NULL_HANDLE;

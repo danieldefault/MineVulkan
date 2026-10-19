@@ -214,8 +214,9 @@ static void testVegetation() {
             int h = w.terrainHeight(x, z);
             uint8_t above = w.getBlock(x, h + 1, z);
             if (above == BLOCK_CACTUS) CHECK(b == Biome::Desert);
-            if (b == Biome::Forest) { ++forestCols; forestTrees += above == BLOCK_LOG; }
-            if (b == Biome::Plains) { ++plainsCols; plainsTrees += above == BLOCK_LOG; }
+            const bool land = h > SEA_LEVEL + 1;  // praia e água não têm árvores
+            if (land && b == Biome::Forest) { ++forestCols; forestTrees += above == BLOCK_LOG; }
+            if (land && b == Biome::Plains) { ++plainsCols; plainsTrees += above == BLOCK_LOG; }
             int top = surfaceY(w, x, z);
             // A copa pode cair até 2 colunas fora do tronco (e do bioma dele).
             if (w.getBlock(x, top, z) == BLOCK_SPRUCE_LEAVES) CHECK(biomeNear(w, x, z, Biome::Tundra, 2));
@@ -225,6 +226,108 @@ static void testVegetation() {
         double fd = static_cast<double>(forestTrees) / forestCols, pd = static_cast<double>(plainsTrees) / plainsCols;
         CHECK(fd > pd * 3.0);
     }
+}
+
+static void testWater() {
+    World w(1337);
+    int ox = 0, oz = 0;
+    CHECK(findBiome(w, Biome::Ocean, ox, oz));
+    int ocx = floorDiv(ox, CHUNK_SIZE), ocz = floorDiv(oz, CHUNK_SIZE);
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx) w.generateChunk(ocx + dx, ocz + dz);
+    int h = w.terrainHeight(ox, oz);
+    CHECK(h < SEA_LEVEL - 2);
+    CHECK(w.getBlock(ox, h, oz) == BLOCK_SAND || w.getBlock(ox, h, oz) == BLOCK_STONE);
+    CHECK(w.getBlock(ox, h + 1, oz) == BLOCK_WATER);
+    CHECK(w.getBlock(ox, SEA_LEVEL, oz) == BLOCK_WATER);
+    CHECK(w.getBlock(ox, SEA_LEVEL + 1, oz) == BLOCK_AIR);
+    CHECK(!blockSolid(BLOCK_WATER) && !blockOpaque(BLOCK_WATER) && !blockBreakable(BLOCK_WATER));
+
+    // Raycast atravessa a água e acerta o fundo.
+    RayHit r = raycastBlocks(w, Vec3(ox + 0.5f, SEA_LEVEL + 0.5f, oz + 0.5f), Vec3(0, -1, 0), 64.0f);
+    CHECK(r.hit && r.y == h);
+
+    // Malha: quads de água vêm depois dos opacos, só na superfície/bordas, e o topo é rebaixado.
+    std::vector<ChunkVertex> v;
+    uint32_t opaque = buildChunkMesh(w, ocx, ocz, v);
+    CHECK(opaque * 4 <= v.size());
+    size_t waterQuads = v.size() / 4 - opaque;
+    CHECK(waterQuads > 0);
+    for (size_t i = 0; i < v.size(); ++i) {
+        bool isWater = v[i].layer == TILE_WATER;
+        CHECK(isWater == (i >= opaque * 4));
+        if (isWater && (v[i].faceAo & 7) == 2) CHECK(v[i].flags == 1 && v[i].y == SEA_LEVEL + 1);
+        if (!isWater) CHECK((v[i].flags & 1) == 0);
+    }
+    // O fundo do mar (face de cima do bloco do fundo) é marcado como submerso.
+    bool seabedFlagged = false;
+    for (size_t i = 0; i < opaque * 4; ++i) seabedFlagged |= (v[i].flags & 2) && (v[i].faceAo & 7) == 2;
+    CHECK(seabedFlagged);
+    // Sem faces água-água internas: no máximo ~1 quad de superfície por coluna + bordas.
+    CHECK(waterQuads < static_cast<size_t>(CHUNK_SIZE * CHUNK_SIZE * 3));
+
+    // Quebrar bloco ao lado da água enche o buraco; longe da água fica ar.
+    w.setBlock(ox, SEA_LEVEL + 1, oz, BLOCK_STONE);
+    w.setBlock(ox + 1, SEA_LEVEL + 1, oz, BLOCK_STONE);
+    w.breakBlock(ox, h, oz);
+    CHECK(w.getBlock(ox, h, oz) == BLOCK_WATER);
+    w.breakBlock(ox + 1, SEA_LEVEL + 1, oz);  // vizinho de cima é ar; dos lados, pedra/ar
+    CHECK(w.getBlock(ox + 1, SEA_LEVEL + 1, oz) == BLOCK_AIR);
+}
+
+static void testSwimming() {
+    World w(1337);
+    int ox = 0, oz = 0;
+    CHECK(findBiome(w, Biome::Ocean, ox, oz));
+    int ocx = floorDiv(ox, CHUNK_SIZE), ocz = floorDiv(oz, CHUNK_SIZE);
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx) {
+            w.generateChunk(ocx + dx, ocz + dz);
+            Chunk* c = w.getChunk(ocx + dx, ocz + dz);
+            // Piscina controlada: fundo em 30, água até o nível do mar.
+            for (int z = 0; z < CHUNK_SIZE; ++z)
+                for (int x = 0; x < CHUNK_SIZE; ++x)
+                    for (int y = 1; y < CHUNK_HEIGHT; ++y)
+                        c->set(x, y, z, y <= 30 ? BLOCK_STONE : (y <= SEA_LEVEL ? BLOCK_WATER : BLOCK_AIR));
+        }
+    const float x0 = ocx * CHUNK_SIZE + 8.5f, z0 = ocz * CHUNK_SIZE + 8.5f;
+    Player p;
+    p.pos = Vec3(x0, 40.0f, z0);
+    PlayerInput none;
+    float minVy = 0;
+    for (int i = 0; i < 60; ++i) { p.step(w, none, 1.0f / 60.0f); minVy = std::min(minVy, p.vel.y); }
+    CHECK(p.inWater);
+    CHECK(minVy >= -Player::kSinkSpeed - 0.01f);  // afunda devagar, sem queda livre
+    PlayerInput up;
+    up.jump = true;
+    float y0 = p.pos.y;
+    for (int i = 0; i < 60; ++i) p.step(w, up, 1.0f / 60.0f);
+    CHECK(p.pos.y > y0 + 1.0f);  // nadar sobe
+
+    // Margem: degrau de 1 bloco acima da água à frente (-Z). Nadando contra ela, sai da água.
+    int bz = static_cast<int>(std::floor(z0)) - 3;
+    for (int z = bz - 14; z <= bz; ++z)  // margem longa: em 4 s andando não chega ao fim
+        for (int x = static_cast<int>(x0) - 3; x <= static_cast<int>(x0) + 3; ++x)
+            for (int y = 31; y <= SEA_LEVEL + 1; ++y) w.setBlock(x, y, z, BLOCK_STONE);
+    p.pos = Vec3(x0, SEA_LEVEL - 0.6f, z0);
+    p.vel = Vec3();
+    p.yaw = 0;
+    PlayerInput fwd;
+    fwd.moveZ = 1.0f;
+    fwd.jump = true;
+    for (int i = 0; i < 240; ++i) p.step(w, fwd, 1.0f / 60.0f);
+    CHECK(p.pos.z < static_cast<float>(bz) + 0.5f);  // subiu na margem
+    CHECK(p.pos.y >= SEA_LEVEL + 2 - 0.01f);
+    CHECK(!p.inWater);
+}
+
+static void testFindLand() {
+    World w(1337);
+    int ox = 0, oz = 0;
+    CHECK(findBiome(w, Biome::Ocean, ox, oz));
+    int x = ox, z = oz;
+    CHECK(w.findLand(x, z, 2048));
+    CHECK(w.terrainHeight(x, z) > SEA_LEVEL + 1);
 }
 
 int main() {
@@ -237,6 +340,9 @@ int main() {
     testEditsSurviveUnload();
     testBiomes();
     testVegetation();
+    testWater();
+    testSwimming();
+    testFindLand();
     if (g_failed) {
         std::printf("%d verificação(ões) falharam\n", g_failed);
         return 1;
