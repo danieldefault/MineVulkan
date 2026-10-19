@@ -126,13 +126,29 @@ static void testTextures() {
 static void testStreaming() {
     World w(3);
     for (int i = 0; i < 400; ++i) w.update(0, 0, 4, 8);
-    CHECK(w.chunks().size() == 81);
-    CHECK(w.hasAllNeighbors(0, 0));
+    CHECK(w.chunks().size() == 121);  // raio 4 + anel extra de dados
+    // Todo chunk dentro do raio pode ser malhado (inclusive a borda).
+    for (int z = -4; z <= 4; ++z)
+        for (int x = -4; x <= 4; ++x) CHECK(w.hasAllNeighbors(x, z));
     for (int i = 0; i < 400; ++i) w.update(16.0f * 20, 0, 4, 8);
     auto un = w.takeUnloaded();
     CHECK(!un.empty());
     CHECK(w.getChunk(0, 0) == nullptr);
-    CHECK(w.chunks().size() <= 121);
+    CHECK(w.chunks().size() <= 169);
+}
+
+static void testEditsSurviveUnload() {
+    World w(5);
+    for (int i = 0; i < 400; ++i) w.update(0, 0, 2, 8);
+    int h = w.terrainHeight(3, 3);
+    w.setBlock(3, h + 5, 3, BLOCK_PLANKS);
+    w.setBlock(3, h, 3, BLOCK_AIR);
+    for (int i = 0; i < 400; ++i) w.update(16.0f * 30, 0, 2, 8);
+    CHECK(w.getChunk(0, 0) == nullptr);
+    for (int i = 0; i < 400; ++i) w.update(0, 0, 2, 8);
+    CHECK(w.getChunk(0, 0) != nullptr);
+    CHECK(w.getBlock(3, h + 5, 3) == BLOCK_PLANKS);
+    CHECK(w.getBlock(3, h, 3) == BLOCK_AIR);
 }
 
 int main() {
@@ -142,6 +158,7 @@ int main() {
     testPlayerPhysics();
     testTextures();
     testStreaming();
+    testEditsSurviveUnload();
     if (g_failed) {
         std::printf("%d verificação(ões) falharam\n", g_failed);
         return 1;

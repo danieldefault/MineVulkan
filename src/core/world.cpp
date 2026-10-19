@@ -59,6 +59,7 @@ bool World::setBlock(int x, int y, int z, uint8_t b) {
     int lx = x - cx * CHUNK_SIZE, lz = z - cz * CHUNK_SIZE;
     c->set(lx, y, lz, b);
     c->meshDirty = true;
+    edits_[chunkKey(cx, cz)][Chunk::index(lx, y, lz)] = b;
     // Vizinhos que enxergam este bloco (faces e AO, incluindo diagonais).
     int dx = (lx == 0) ? -1 : (lx == CHUNK_SIZE - 1 ? 1 : 0);
     int dz = (lz == 0) ? -1 : (lz == CHUNK_SIZE - 1 ? 1 : 0);
@@ -99,6 +100,9 @@ void World::generateChunk(int cx, int cz) {
         }
     }
     placeTreesInto(c);
+    auto edits = edits_.find(chunkKey(cx, cz));
+    if (edits != edits_.end())
+        for (const auto& e : edits->second) c.blocks[e.first] = e.second;
     chunks_[chunkKey(cx, cz)] = std::move(chunk);
     // Vizinhos já existentes precisam remalhar a borda (faces/AO agora conhecidas).
     for (int dz = -1; dz <= 1; ++dz)
@@ -145,7 +149,7 @@ void World::update(float px, float pz, int radius, int genBudget) {
     int pcz = floorDiv(static_cast<int>(std::floor(pz)), CHUNK_SIZE);
 
     // Anéis concêntricos: o mais próximo primeiro.
-    for (int ring = 0; ring <= radius && genBudget > 0; ++ring) {
+    for (int ring = 0; ring <= radius + 1 && genBudget > 0; ++ring) {
         for (int dz = -ring; dz <= ring && genBudget > 0; ++dz) {
             for (int dx = -ring; dx <= ring && genBudget > 0; ++dx) {
                 if (std::max(std::abs(dx), std::abs(dz)) != ring) continue;
@@ -159,7 +163,7 @@ void World::update(float px, float pz, int radius, int genBudget) {
 
     for (auto it = chunks_.begin(); it != chunks_.end();) {
         const Chunk& c = *it->second;
-        if (std::max(std::abs(c.cx - pcx), std::abs(c.cz - pcz)) > radius + 1) {
+        if (std::max(std::abs(c.cx - pcx), std::abs(c.cz - pcz)) > radius + 2) {
             unloaded_.push_back(it->first);
             it = chunks_.erase(it);
         } else {
