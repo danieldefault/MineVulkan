@@ -1,0 +1,27 @@
+name: Desktop (testes)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libvulkan-dev glslc libxcb1-dev \
+            mesa-vulkan-drivers vulkan-validationlayers xvfb
+      - name: Compilar
+        run: |
+          cmake -S . -B build -G Ninja
+          cmake --build build
+      - name: Testes do núcleo
+        run: ./build/core_tests
+      # Renderiza 300 frames na GPU por software (lavapipe) com a camada de validação:
+      # o executável sai com código 2 se houver qualquer erro de validação do Vulkan.
+      - name: Smoke test do renderer (validação Vulkan)
+        run: xvfb-run -a env VC_VALIDATION=1 ./build/voxelcraft --frames 300 --walk --turn 0.01

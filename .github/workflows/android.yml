@@ -13,6 +13,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+          cache: gradle
       - name: Compilar APK (release, assinado com chave de debug)
         run: |
           chmod +x gradlew

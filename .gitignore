@@ -1,0 +1,15 @@
+# CMake (desktop)
+/build/
+/build-*/
+
+# Gradle / Android
+.gradle/
+/app/build/
+/app/.cxx/
+local.properties
+*.apk
+
+# IDEs
+.idea/
+.vscode/
+*.iml

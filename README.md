@@ -19,8 +19,10 @@ Um clone de Minecraft escrito do zero em **C++17 + Vulkan 1.0**, pensado para ro
 
 - 🌍 **Mundo infinito** em chunks de 16×16×128, gerado por ruído: planícies, colinas, montanhas, desertos e árvores
 - 📦 **Streaming de chunks** ao redor do jogador, mais próximos primeiro, com orçamento de geração/malha por frame
+- 💾 **Edições preservadas**: blocos quebrados/colocados continuam lá ao se afastar e voltar (durante a sessão)
 - 🧱 **Malha otimizada** com face culling e oclusão de ambiente por vértice (AO "estilo Minecraft")
 - 🏃 **Física do jogador**: AABB, gravidade, pulo, colisão eixo a eixo e pulo automático em degraus
+- 🖥️ **Câmera interpolada**: física fixa em 60 Hz, imagem suave em telas de 90/120 Hz
 - ⛏️ **Quebrar e colocar blocos** via raycast DDA, com hotbar de 8 blocos
 - 🎨 **Texturas 16×16 procedurais** em um texture array com mipmaps
 - 🌫️ **Névoa na distância** e **frustum culling** por chunk
@@ -40,6 +42,8 @@ Blocos disponíveis: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, a
 | Pré-rotação do swapchain (`preTransform = currentTransform`) | Evita que o compositor do Android gire cada frame |
 | Present mode `FIFO` (vsync) | Sempre disponível, estável e economiza bateria/temperatura |
 | Texture array em vez de atlas | Mipmaps sem "vazamento" entre texturas vizinhas |
+| Chunks desenhados da frente para trás | O early-Z descarta fragmentos escondidos antes do fragment shader (menos overdraw) |
+| AABB de culling com a altura real da malha | Chunks abaixo/acima da câmera são descartados mais cedo |
 
 ---
 
@@ -61,6 +65,7 @@ Blocos disponíveis: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, a
 ### Opção A — GitHub Actions (sem instalar nada)
 
 O workflow [`.github/workflows/android.yml`](.github/workflows/android.yml) compila um APK release a cada push.
+Em paralelo, [`.github/workflows/desktop.yml`](.github/workflows/desktop.yml) compila a versão Linux, roda os testes do núcleo e renderiza 300 frames com a camada de validação do Vulkan (GPU por software), falhando se houver qualquer erro de validação.
 
 1. Faça um fork ou envie o projeto para um repositório seu.
 2. Abra **Actions → (última execução) → Artifacts**.
@@ -131,7 +136,7 @@ src/game/      liga mundo + jogador + renderer, independente de plataforma
 src/platform/  android/ (NativeActivity) e desktop/ (X11/xcb)
 shaders/       GLSL, compilado para SPIR-V e embutido no binário durante o build
 cmake/         scripts de compilação e embutimento dos shaders
-tests/         testes do núcleo (terreno, mesher, raycast, física, texturas, streaming)
+tests/         testes do núcleo (terreno, mesher, raycast, física, texturas, streaming, edições)
 app/           módulo Android (Gradle)
 ```
 
