@@ -21,6 +21,9 @@ struct Chunk {
     void set(int x, int y, int z, uint8_t b) { blocks[index(x, y, z)] = b; }
 };
 
+enum class Biome : uint8_t { Plains, Forest, Desert, Tundra, Mountains };
+const char* biomeName(Biome b);
+
 inline int floorDiv(int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
 inline int64_t chunkKey(int cx, int cz) {
     return (static_cast<int64_t>(cx) << 32) ^ static_cast<int64_t>(static_cast<uint32_t>(cz));
@@ -48,17 +51,19 @@ public:
     std::vector<int64_t> takeUnloaded();
 
     int terrainHeight(int x, int z) const;
-    bool isDesert(int x, int z) const;
+    // Bioma da coluna: temperatura e umidade (ruídos de baixa frequência) + altitude.
+    Biome biomeAt(int x, int z) const;
+    Biome biomeAt(int x, int z, int height) const;  // evita recalcular a altura
     int findSpawnY(int x, int z) const;
 
     const std::unordered_map<int64_t, std::unique_ptr<Chunk>>& chunks() const { return chunks_; }
 
 private:
-    void placeTreesInto(Chunk& c) const;
+    void placeVegetationInto(Chunk& c) const;
     void markDirty(int cx, int cz);
 
     uint32_t seed_;
-    Noise2D continental_, hills_, mountains_, desert_;
+    Noise2D continental_, hills_, mountains_, temperature_, humidity_;
     std::unordered_map<int64_t, std::unique_ptr<Chunk>> chunks_;
     std::vector<int64_t> unloaded_;
     // Blocos alterados pelo jogador (chunk -> índice -> bloco), reaplicados quando o

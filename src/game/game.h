@@ -16,6 +16,7 @@ struct GameConfig {
     int genPerFrame = 4;    // chunks gerados por frame
     int meshPerFrame = 4;   // chunks remalhados por frame
     bool touchUi = false;   // desenha joystick/pulo
+    int spawnX = 8, spawnZ = 8;  // coluna inicial do jogador
 };
 
 // Liga mundo, jogador e renderer. Independente de plataforma.

@@ -13,9 +13,10 @@ constexpr float kReach = 6.0f;
 
 Game::Game(Renderer& renderer, const GameConfig& cfg) : renderer_(renderer), cfg_(cfg), world_(cfg.seed) {
     // Área inicial gerada de forma síncrona para posicionar o jogador.
-    const int sx = 8, sz = 8;
+    const int sx = cfg.spawnX, sz = cfg.spawnZ;
+    const int scx = floorDiv(sx, CHUNK_SIZE), scz = floorDiv(sz, CHUNK_SIZE);
     for (int dz = -2; dz <= 2; ++dz)
-        for (int dx = -2; dx <= 2; ++dx) world_.generateChunk(dx, dz);
+        for (int dx = -2; dx <= 2; ++dx) world_.generateChunk(scx + dx, scz + dz);
     player_.pos = Vec3(sx + 0.5f, static_cast<float>(world_.findSpawnY(sx, sz)), sz + 0.5f);
     player_.yaw = 0.6f;
     player_.pitch = -0.25f;
@@ -139,8 +140,10 @@ void Game::frame(double now, FrameInput in) {
     ++fpsFrames_;
     fpsTimer_ += dt;
     if (fpsTimer_ >= 2.0) {
-        LOGI("FPS %.1f | chunks %zu | desenhados %u | pos %.1f %.1f %.1f", fpsFrames_ / fpsTimer_,
-             world_.chunks().size(), renderer_.lastDrawnChunks(), player_.pos.x, player_.pos.y, player_.pos.z);
+        int bx = static_cast<int>(std::floor(player_.pos.x)), bz = static_cast<int>(std::floor(player_.pos.z));
+        LOGI("FPS %.1f | chunks %zu | desenhados %u | pos %.1f %.1f %.1f | %s", fpsFrames_ / fpsTimer_,
+             world_.chunks().size(), renderer_.lastDrawnChunks(), player_.pos.x, player_.pos.y, player_.pos.z,
+             biomeName(world_.biomeAt(bx, bz)));
         fpsFrames_ = 0;
         fpsTimer_ = 0;
     }

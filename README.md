@@ -17,7 +17,18 @@ Um clone de Minecraft escrito do zero em **C++17 + Vulkan 1.0**, pensado para ro
 
 **Marco 1 — núcleo jogável**
 
-- 🌍 **Mundo infinito** em chunks de 16×16×128, gerado por ruído: planícies, colinas, montanhas, desertos e árvores
+- 🌍 **Mundo infinito** em chunks de 16×16×128, gerado por ruído
+- 🏞️ **Biomas** definidos por temperatura, umidade e altitude:
+
+  | Bioma | Superfície | Vegetação |
+  |---|---|---|
+  | Planície | grama | carvalhos esparsos |
+  | Floresta | grama | carvalhos densos |
+  | Deserto | areia sobre arenito | cactos |
+  | Tundra | terra com neve | pinheiros |
+  | Montanha | pedra; neve acima da linha de neve | — |
+
+  Encostas íngremes expõem pedra em qualquer bioma (exceto deserto).
 - 📦 **Streaming de chunks** ao redor do jogador, mais próximos primeiro, com orçamento de geração/malha por frame
 - 💾 **Edições preservadas**: blocos quebrados/colocados continuam lá ao se afastar e voltar (durante a sessão)
 - 🧱 **Malha otimizada** com face culling e oclusão de ambiente por vértice (AO "estilo Minecraft")
@@ -28,7 +39,7 @@ Um clone de Minecraft escrito do zero em **C++17 + Vulkan 1.0**, pensado para ro
 - 🌫️ **Névoa na distância** e **frustum culling** por chunk
 - 📱 **Controles touch**: joystick virtual, arrastar para olhar, botão de pulo
 
-Blocos disponíveis: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, areia (e bedrock, indestrutível).
+Blocos na hotbar: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, areia, arenito e neve. Também aparecem no mundo: terra com neve, cacto, folhas de pinheiro e bedrock (indestrutível).
 
 ---
 
@@ -56,7 +67,7 @@ Blocos disponíveis: grama, terra, pedra, pedregulho, tábuas, tronco, folhas, a
 | Pular | Botão de pulo | `Espaço` |
 | Colocar bloco | Toque curto | Botão direito |
 | Quebrar bloco | Segurar | Botão esquerdo |
-| Trocar bloco | Toque na hotbar | `1`–`8` ou roda do mouse |
+| Trocar bloco | Toque na hotbar | `1`–`9`, `0` ou roda do mouse |
 
 ---
 
@@ -122,6 +133,7 @@ VC_VALIDATION=1 ./build/voxelcraft # com a camada de validação do Vulkan (se i
 | `--radius N` | Distância de renderização em chunks (padrão: 8) |
 | `--seed N` | Semente do mundo (padrão: 1337) |
 | `--touch-ui` | Mostra a HUD touch no PC |
+| `--spawn X Z` | Começa na coluna (X, Z) — útil para visitar um bioma (o log mostra o bioma atual) |
 | `--frames N` | Encerra após N frames (testes automatizados) |
 | `--walk` / `--turn R` | Anda para frente / gira a câmera R rad por frame sozinho |
 
@@ -136,7 +148,7 @@ src/game/      liga mundo + jogador + renderer, independente de plataforma
 src/platform/  android/ (NativeActivity) e desktop/ (X11/xcb)
 shaders/       GLSL, compilado para SPIR-V e embutido no binário durante o build
 cmake/         scripts de compilação e embutimento dos shaders
-tests/         testes do núcleo (terreno, mesher, raycast, física, texturas, streaming, edições)
+tests/         testes do núcleo (terreno, biomas, vegetação, mesher, raycast, física, texturas, streaming, edições)
 app/           módulo Android (Gradle)
 ```
 
@@ -153,6 +165,7 @@ O mesmo `CMakeLists.txt` é usado nas duas plataformas: no Android ele é chamad
 | Imagem girada em algum aparelho | `kUsePreRotation = false` em [`src/render/renderer.cpp`](src/render/renderer.cpp) |
 | Sensibilidade do toque | `kLookSensitivity` em [`src/core/touch_controls.cpp`](src/core/touch_controls.cpp) |
 | Blocos da hotbar | `kHotbar` em [`src/core/block.h`](src/core/block.h) |
+| Limiares/densidade dos biomas | `World::biomeAt` e `placeVegetationInto` em [`src/core/world.cpp`](src/core/world.cpp) |
 
 ---
 

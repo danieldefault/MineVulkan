@@ -3,24 +3,58 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+constexpr int kMountainHeight = 86;  // acima disto: montanha (pedra exposta)
+constexpr int kSnowLine = 98;        // acima disto: neve em qualquer bioma
+constexpr int kCliffDrop = 3;        // desnível p/ algum vizinho a partir do qual a encosta é pedra
+}  // namespace
+
 World::World(uint32_t seed)
     : seed_(seed),
       continental_(seed * 31u + 1u),
       hills_(seed * 31u + 2u),
       mountains_(seed * 31u + 3u),
-      desert_(seed * 31u + 4u) {}
+      temperature_(seed * 31u + 4u),
+      humidity_(seed * 31u + 5u) {}
+
+const char* biomeName(Biome b) {
+    switch (b) {
+        case Biome::Plains: return "planicie";
+        case Biome::Forest: return "floresta";
+        case Biome::Desert: return "deserto";
+        case Biome::Tundra: return "tundra";
+        case Biome::Mountains: return "montanha";
+    }
+    return "?";
+}
 
 int World::terrainHeight(int x, int z) const {
     float fx = static_cast<float>(x), fz = static_cast<float>(z);
     float c = continental_.fbm(fx * 0.0025f, fz * 0.0025f, 4);
     float h = hills_.fbm(fx * 0.012f, fz * 0.012f, 4);
-    float m = std::max(0.0f, mountains_.fbm(fx * 0.005f, fz * 0.005f, 4) * 1.8f - 0.15f);
+    // O fBm fica quase sempre em [-0.2, 0.2]: começa a subir a partir do percentil ~70
+    // (0.05) para que ~5% das colunas passem de kMountainHeight.
+    float m = std::max(0.0f, (mountains_.fbm(fx * 0.005f, fz * 0.005f, 4) - 0.05f) / 0.16f);
     float height = 46.0f + c * 12.0f + h * 7.0f + m * m * 55.0f;
+    // Comprime suavemente acima de 90 rumo ao teto (assíntota): picos continuam pontudos
+    // em vez de virarem platôs cortados em CHUNK_HEIGHT - 12.
+    const float knee = 90.0f, room = static_cast<float>(CHUNK_HEIGHT - 12) - knee;
+    if (height > knee) height = knee + room * (1.0f - std::exp(-(height - knee) / room));
     return std::clamp(static_cast<int>(height), 4, CHUNK_HEIGHT - 12);
 }
 
-bool World::isDesert(int x, int z) const {
-    return desert_.fbm(static_cast<float>(x) * 0.003f, static_cast<float>(z) * 0.003f, 3) > 0.28f;
+Biome World::biomeAt(int x, int z) const { return biomeAt(x, z, terrainHeight(x, z)); }
+
+Biome World::biomeAt(int x, int z, int height) const {
+    if (height > kMountainHeight) return Biome::Mountains;
+    float fx = static_cast<float>(x) * 0.0016f, fz = static_cast<float>(z) * 0.0016f;
+    // Limiares escolhidos pelos percentis do fBm (~[-0.17, 0.17] em 80% das colunas):
+    // ~20% tundra, ~15% deserto, ~35% floresta, resto planície.
+    float t = temperature_.fbm(fx, fz, 3);
+    if (t < -0.10f) return Biome::Tundra;
+    float h = humidity_.fbm(fx + 100.0f, fz, 3);
+    if (t > 0.07f && h < 0.03f) return Biome::Desert;
+    return h > 0.0f ? Biome::Forest : Biome::Plains;
 }
 
 Chunk* World::getChunk(int cx, int cz) {
@@ -81,17 +115,34 @@ void World::generateChunk(int cx, int cz) {
     chunk->cx = cx;
     chunk->cz = cz;
     Chunk& c = *chunk;
+    // Alturas com borda de 1 coluna: o desnível para os vizinhos define os penhascos.
+    constexpr int HP = CHUNK_SIZE + 2;
+    int heights[HP * HP];
+    for (int z = 0; z < HP; ++z)
+        for (int x = 0; x < HP; ++x)
+            heights[z * HP + x] = terrainHeight(cx * CHUNK_SIZE + x - 1, cz * CHUNK_SIZE + z - 1);
     for (int lz = 0; lz < CHUNK_SIZE; ++lz) {
         for (int lx = 0; lx < CHUNK_SIZE; ++lx) {
             int wx = cx * CHUNK_SIZE + lx, wz = cz * CHUNK_SIZE + lz;
-            int h = terrainHeight(wx, wz);
-            bool desert = isDesert(wx, wz);
-            uint8_t top = desert ? BLOCK_SAND : (h > 86 ? BLOCK_STONE : BLOCK_GRASS);
-            uint8_t sub = desert ? BLOCK_SAND : (h > 86 ? BLOCK_STONE : BLOCK_DIRT);
+            const int* hp = &heights[(lz + 1) * HP + lx + 1];
+            int h = *hp;
+            int lowest = std::min(std::min(hp[-1], hp[1]), std::min(hp[-HP], hp[HP]));
+            bool cliff = h - lowest >= kCliffDrop;
+            Biome biome = biomeAt(wx, wz, h);
+            uint8_t top = BLOCK_GRASS, sub = BLOCK_DIRT, deep = BLOCK_STONE;
+            switch (biome) {
+                case Biome::Desert: top = sub = BLOCK_SAND; deep = BLOCK_SANDSTONE; break;
+                case Biome::Tundra: top = BLOCK_SNOW; break;
+                case Biome::Mountains: top = h > kSnowLine ? BLOCK_SNOW_BLOCK : BLOCK_STONE; sub = BLOCK_STONE; break;
+                default: break;
+            }
+            // Encosta íngreme: rocha exposta (sem degraus de grama/terra), exceto no deserto.
+            if (cliff && biome != Biome::Desert) top = sub = BLOCK_STONE;
             for (int y = 0; y < CHUNK_HEIGHT; ++y) {
                 uint8_t b;
                 if (y == 0) b = BLOCK_BEDROCK;
-                else if (y < h - 4) b = BLOCK_STONE;
+                else if (y < h - 8) b = BLOCK_STONE;
+                else if (y < h - 4) b = deep;  // arenito sob a areia do deserto
                 else if (y < h) b = sub;
                 else if (y == h) b = top;
                 else b = BLOCK_AIR;
@@ -99,7 +150,7 @@ void World::generateChunk(int cx, int cz) {
             }
         }
     }
-    placeTreesInto(c);
+    placeVegetationInto(c);
     auto edits = edits_.find(chunkKey(cx, cz));
     if (edits != edits_.end())
         for (const auto& e : edits->second) c.blocks[e.first] = e.second;
@@ -110,9 +161,9 @@ void World::generateChunk(int cx, int cz) {
             if (dx || dz) markDirty(cx + dx, cz + dz);
 }
 
-// Árvores são função pura da coluna: cada chunk insere as partes que caem dentro dele,
+// Vegetação é função pura da coluna: cada chunk insere as partes que caem dentro dele,
 // inclusive copas de árvores com tronco no chunk vizinho. Não há escrita entre chunks.
-void World::placeTreesInto(Chunk& c) const {
+void World::placeVegetationInto(Chunk& c) const {
     const int x0 = c.cx * CHUNK_SIZE, z0 = c.cz * CHUNK_SIZE;
     auto put = [&](int wx, int y, int wz, uint8_t b, bool onlyAir) {
         int lx = wx - x0, lz = wz - z0;
@@ -120,26 +171,61 @@ void World::placeTreesInto(Chunk& c) const {
         if (onlyAir && c.get(lx, y, lz) != BLOCK_AIR) return;
         c.set(lx, y, lz, b);
     };
+    // Copa redonda (carvalho): 2 camadas de raio 2 + 2 de raio 1, cantos aleatórios.
+    auto oak = [&](int tx, int tz, int ground, uint32_t h) {
+        int top = ground + 4 + static_cast<int>((h >> 8) % 3u);
+        for (int y = top - 2; y <= top + 1; ++y) {
+            int r = (y >= top) ? 1 : 2;
+            for (int dz = -r; dz <= r; ++dz)
+                for (int dx = -r; dx <= r; ++dx) {
+                    bool corner = (std::abs(dx) == r && std::abs(dz) == r);
+                    if (corner && (r == 1 || (hash2i(tx * 5 + dx, tz * 5 + dz + y, seed_ ^ 0x5bd1e995u) & 1u)))
+                        continue;
+                    put(tx + dx, y, tz + dz, BLOCK_LEAVES, true);
+                }
+        }
+        for (int y = ground + 1; y <= top; ++y) put(tx, y, tz, BLOCK_LOG, false);
+    };
+    // Pinheiro: tronco alto e copa cônica alternando raios 2/1, ponta no topo.
+    auto spruce = [&](int tx, int tz, int ground, uint32_t h) {
+        int top = ground + 6 + static_cast<int>((h >> 8) % 3u);
+        put(tx, top + 1, tz, BLOCK_SPRUCE_LEAVES, true);
+        for (int y = ground + 3; y <= top; ++y) {
+            int r = (y >= top - 1) ? 1 : ((top - y) % 2 == 0 ? 2 : 1);
+            for (int dz = -r; dz <= r; ++dz)
+                for (int dx = -r; dx <= r; ++dx) {
+                    if (std::abs(dx) == r && std::abs(dz) == r) continue;  // sem cantos
+                    put(tx + dx, y, tz + dz, BLOCK_SPRUCE_LEAVES, true);
+                }
+        }
+        for (int y = ground + 1; y <= top; ++y) put(tx, y, tz, BLOCK_LOG, false);
+    };
     for (int tz = z0 - 2; tz < z0 + CHUNK_SIZE + 2; ++tz) {
         for (int tx = x0 - 2; tx < x0 + CHUNK_SIZE + 2; ++tx) {
             uint32_t h = hash2i(tx, tz, seed_);
-            if (h % 151u != 0) continue;
-            if (isDesert(tx, tz)) continue;
+            if (h % 41u != 0) continue;  // filtro barato antes de calcular altura/bioma
             int ground = terrainHeight(tx, tz);
-            if (ground > 84) continue;
-            int trunk = 4 + static_cast<int>((h >> 8) % 3u);
-            int top = ground + trunk;
-            for (int y = top - 2; y <= top + 1; ++y) {
-                int r = (y >= top) ? 1 : 2;
-                for (int dz = -r; dz <= r; ++dz)
-                    for (int dx = -r; dx <= r; ++dx) {
-                        bool corner = (std::abs(dx) == r && std::abs(dz) == r);
-                        if (corner && (r == 1 || (hash2i(tx * 5 + dx, tz * 5 + dz + y, seed_ ^ 0x5bd1e995u) & 1u)))
-                            continue;
-                        put(tx + dx, y, tz + dz, BLOCK_LEAVES, true);
-                    }
+            int lowest = std::min(std::min(terrainHeight(tx - 1, tz), terrainHeight(tx + 1, tz)),
+                                  std::min(terrainHeight(tx, tz - 1), terrainHeight(tx, tz + 1)));
+            if (ground - lowest >= kCliffDrop) continue;  // nada cresce em rocha exposta
+            uint32_t roll = (h >> 16) % 16u;  // densidade por bioma: chance = n/16 dos candidatos
+            switch (biomeAt(tx, tz, ground)) {
+                case Biome::Forest:
+                    if (roll < 12) oak(tx, tz, ground, h);
+                    break;
+                case Biome::Plains:
+                    if (roll < 2) oak(tx, tz, ground, h);
+                    break;
+                case Biome::Tundra:
+                    if (roll < 6) spruce(tx, tz, ground, h);
+                    break;
+                case Biome::Desert:
+                    if (roll < 3)  // cacto de 1 a 3 blocos
+                        for (int y = ground + 1; y <= ground + 1 + static_cast<int>((h >> 8) % 3u); ++y)
+                            put(tx, y, tz, BLOCK_CACTUS, true);
+                    break;
+                case Biome::Mountains: break;
             }
-            for (int y = ground + 1; y <= top; ++y) put(tx, y, tz, BLOCK_LOG, false);
         }
     }
 }

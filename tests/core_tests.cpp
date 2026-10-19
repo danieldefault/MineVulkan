@@ -151,6 +151,82 @@ static void testEditsSurviveUnload() {
     CHECK(w.getBlock(3, h, 3) == BLOCK_AIR);
 }
 
+// Coluna (x, z) de cada bioma perto da origem (varredura em grade).
+static bool findBiome(const World& w, Biome b, int& ox, int& oz) {
+    for (int r = 0; r < 4000; r += 8)
+        for (int z = -r; z <= r; z += 8)
+            for (int x = -r; x <= r; x += 8) {
+                if (std::max(std::abs(x), std::abs(z)) != r) continue;
+                if (w.biomeAt(x, z) == b) { ox = x; oz = z; return true; }
+            }
+    return false;
+}
+
+static bool biomeNear(const World& w, int x, int z, Biome b, int r) {
+    for (int dz = -r; dz <= r; ++dz)
+        for (int dx = -r; dx <= r; ++dx)
+            if (w.biomeAt(x + dx, z + dz) == b) return true;
+    return false;
+}
+
+static int surfaceY(const World& w, int x, int z) {
+    int y = CHUNK_HEIGHT - 1;
+    while (y > 0 && w.getBlock(x, y, z) == BLOCK_AIR) --y;
+    return y;
+}
+
+static void testBiomes() {
+    World w(1337);
+    CHECK(World(1337).biomeAt(300, -700) == w.biomeAt(300, -700));  // determinístico
+    const Biome all[] = {Biome::Plains, Biome::Forest, Biome::Desert, Biome::Tundra, Biome::Mountains};
+    for (Biome b : all) {
+        int x = 0, z = 0;
+        bool found = findBiome(w, b, x, z);
+        CHECK(found);
+        if (!found) continue;
+        int cx = floorDiv(x, CHUNK_SIZE), cz = floorDiv(z, CHUNK_SIZE);
+        if (!w.getChunk(cx, cz)) w.generateChunk(cx, cz);
+        int h = w.terrainHeight(x, z);
+        uint8_t top = w.getBlock(x, h, z);
+        switch (b) {
+            case Biome::Desert:
+                CHECK(top == BLOCK_SAND);
+                CHECK(w.getBlock(x, h - 6, z) == BLOCK_SANDSTONE);
+                break;
+            case Biome::Tundra: CHECK(top == BLOCK_SNOW || top == BLOCK_STONE); break;
+            case Biome::Mountains: CHECK(top == BLOCK_STONE || top == BLOCK_SNOW_BLOCK); break;
+            default: CHECK(top == BLOCK_GRASS || top == BLOCK_STONE); break;
+        }
+        CHECK(h <= CHUNK_HEIGHT - 12);
+    }
+}
+
+// Vegetação conforme o bioma: cacto só no deserto, pinheiro só na tundra,
+// floresta bem mais densa que planície.
+static void testVegetation() {
+    World w(1337);
+    for (int z = -12; z <= 12; ++z)
+        for (int x = -12; x <= 12; ++x) w.generateChunk(x, z);
+    int forestCols = 0, forestTrees = 0, plainsCols = 0, plainsTrees = 0;
+    for (int z = -12 * CHUNK_SIZE; z < 13 * CHUNK_SIZE; ++z)
+        for (int x = -12 * CHUNK_SIZE; x < 13 * CHUNK_SIZE; ++x) {
+            Biome b = w.biomeAt(x, z);
+            int h = w.terrainHeight(x, z);
+            uint8_t above = w.getBlock(x, h + 1, z);
+            if (above == BLOCK_CACTUS) CHECK(b == Biome::Desert);
+            if (b == Biome::Forest) { ++forestCols; forestTrees += above == BLOCK_LOG; }
+            if (b == Biome::Plains) { ++plainsCols; plainsTrees += above == BLOCK_LOG; }
+            int top = surfaceY(w, x, z);
+            // A copa pode cair até 2 colunas fora do tronco (e do bioma dele).
+            if (w.getBlock(x, top, z) == BLOCK_SPRUCE_LEAVES) CHECK(biomeNear(w, x, z, Biome::Tundra, 2));
+        }
+    CHECK(forestCols > 0 && plainsCols > 0);
+    if (forestCols > 0 && plainsCols > 0) {
+        double fd = static_cast<double>(forestTrees) / forestCols, pd = static_cast<double>(plainsTrees) / plainsCols;
+        CHECK(fd > pd * 3.0);
+    }
+}
+
 int main() {
     testTerrain();
     testMesher();
@@ -159,6 +235,8 @@ int main() {
     testTextures();
     testStreaming();
     testEditsSurviveUnload();
+    testBiomes();
+    testVegetation();
     if (g_failed) {
         std::printf("%d verificação(ões) falharam\n", g_failed);
         return 1;

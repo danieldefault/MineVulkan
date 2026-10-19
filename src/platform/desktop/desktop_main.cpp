@@ -1,7 +1,7 @@
 // Versão desktop (Linux, XCB) — para iterar rápido no PC e testar sem celular.
 // Funciona em X11 e em Wayland via XWayland.
 // Controles: WASD mover, espaço pular, mouse olhar, botão esq. quebrar, dir. colocar,
-// 1-8/roda selecionar bloco, Esc libera o mouse, clique captura de novo.
+// 1-9, 0/roda selecionar bloco, Esc libera o mouse, clique captura de novo.
 #include <xcb/xcb.h>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_xcb.h>
@@ -22,7 +22,7 @@ double nowSeconds() {
 }
 
 // Keycodes X11 padrão (evdev + 8), válidos em qualquer layout físico QWERTY.
-enum : uint8_t { KC_ESC = 9, KC_1 = 10, KC_8 = 17, KC_W = 25, KC_A = 38, KC_S = 39, KC_D = 40, KC_SPACE = 65 };
+enum : uint8_t { KC_ESC = 9, KC_1 = 10, KC_W = 25, KC_A = 38, KC_S = 39, KC_D = 40, KC_SPACE = 65 };
 
 struct Keys {
     bool w = false, a = false, s = false, d = false, space = false;
@@ -51,6 +51,10 @@ int main(int argc, char** argv) {
         else if (a == "--turn" && i + 1 < argc) turnPerFrame = static_cast<float>(std::atof(argv[++i]));
         else if (a == "--walk") walk = true;
         else if (a == "--touch-ui") cfg.touchUi = true;
+        else if (a == "--spawn" && i + 2 < argc) {
+            cfg.spawnX = std::atoi(argv[++i]);
+            cfg.spawnZ = std::atoi(argv[++i]);
+        }
     }
     const char* validationEnv = std::getenv("VC_VALIDATION");
     bool validation = validationEnv && std::strcmp(validationEnv, "0") != 0;
@@ -154,7 +158,7 @@ int main(int argc, char** argv) {
                     else if (kc == KC_D) keys.d = down;
                     else if (kc == KC_SPACE) keys.space = down;
                     else if (kc == KC_ESC && down) setGrab(false);
-                    else if (down && kc >= KC_1 && kc <= KC_8) in.selectSlot = kc - KC_1;
+                    else if (down && kc >= KC_1 && kc < KC_1 + kHotbarSize) in.selectSlot = kc - KC_1;  // 1..9, 0
                     break;
                 }
                 case XCB_BUTTON_PRESS: {

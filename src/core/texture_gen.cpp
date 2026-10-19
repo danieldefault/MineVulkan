@@ -71,6 +71,30 @@ uint32_t pixel(int tile, int x, int y) {
             float k = n < 0.35f ? 0.35f : (n < 0.7f ? 0.6f : 0.9f);
             return shade(110, 110, 110, k);
         }
+        case TILE_SNOW: return shade(240, 246, 250, 0.93f + 0.07f * n);
+        case TILE_SNOW_SIDE: {
+            int edge = 3 + static_cast<int>(rnd(x, 0, 98) * 2.5f);
+            if (y < edge) return shade(240, 246, 250, 0.93f + 0.07f * n);
+            return shade(134, 96, 67, n < 0.12f ? 0.65f : 0.82f + 0.25f * n);
+        }
+        case TILE_SANDSTONE: {
+            // Camadas horizontais com leve variação.
+            float band = (y % 5 == 0) ? 0.86f : 1.0f;
+            return shade(214, 196, 140, band * (0.9f + 0.1f * rnd(x / 2, y, 19)));
+        }
+        case TILE_CACTUS_SIDE: {
+            float rib = (x % 4 == 1) ? 0.78f : 1.0f;
+            if (x % 4 == 1 && y % 4 == 2) return shade(200, 200, 160, 1.0f);  // espinhos
+            return shade(66, 128, 44, rib * (0.88f + 0.16f * n));
+        }
+        case TILE_CACTUS_TOP: {
+            bool rim = x == 0 || y == 0 || x == kTileSize - 1 || y == kTileSize - 1;
+            return shade(rim ? 66 : 96, rim ? 128 : 150, rim ? 44 : 64, 0.88f + 0.14f * n);
+        }
+        case TILE_SPRUCE_LEAVES: {
+            if (n < 0.16f) return shade(24, 52, 30, 0.7f);
+            return shade(40, 84, 52, 0.7f + 0.45f * n);
+        }
         default: return rgba(255, 0, 255);
     }
 }
@@ -115,7 +139,7 @@ MipChain buildMipChain(const std::vector<uint32_t>& level0, int layers) {
 }
 
 uint32_t blockAverageColor(const std::vector<uint32_t>& textures, uint8_t block) {
-    int tile = blockTile(block, block == BLOCK_GRASS ? 2 : 0);  // grama: cor do topo
+    int tile = blockTile(block, (block == BLOCK_GRASS || block == BLOCK_SNOW) ? 2 : 0);  // cor do topo
     uint32_t acc[3] = {0, 0, 0};
     for (int i = 0; i < kTileSize * kTileSize; ++i) {
         uint32_t p = textures[static_cast<size_t>(tile) * kTileSize * kTileSize + i];
